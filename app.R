@@ -31,10 +31,16 @@ library(jsonlite)
 
 library(oro.dicom)
 
+# install.packages("oro.dicom")
+
 library(base64enc)
 library(png)
 
 options(shiny.maxRequestSize = 35*1024^2)
+
+BASE_DATA_DIR <- Sys.getenv("APP_DATA_DIR", "/var/shiny-data")
+DICOM_DIR <- file.path(BASE_DATA_DIR, "dicoms")
+dir.create(DICOM_DIR, showWarnings = FALSE, recursive = TRUE)
 
 source("code/shiny_functions.R", local = TRUE)
 source("code/jh_calculation_functions.R", local = TRUE)
