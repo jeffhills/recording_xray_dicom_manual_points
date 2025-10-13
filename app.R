@@ -38,9 +38,13 @@ library(png)
 
 options(shiny.maxRequestSize = 35*1024^2)
 
+# --- app startup (runs once) ---
 BASE_DATA_DIR <- Sys.getenv("APP_DATA_DIR", "/var/shiny-data")
-DICOM_DIR <- file.path(BASE_DATA_DIR, "dicoms")
+DICOM_DIR     <- file.path(BASE_DATA_DIR, "dicoms")
 dir.create(DICOM_DIR, showWarnings = FALSE, recursive = TRUE)
+
+message(sprintf("DICOM_DIR resolved to: %s", DICOM_DIR))
+stopifnot(file.access(DICOM_DIR, 2) == 0)  # ensure writable
 
 source("code/shiny_functions.R", local = TRUE)
 source("code/jh_calculation_functions.R", local = TRUE)
@@ -982,16 +986,36 @@ server <- function(input, output, session) {
       }
       
       # 3) Ensure dicoms/ folder has only this one file
-      base_dir <- "dicoms"
-      if (dir.exists(base_dir)) unlink(base_dir, recursive = TRUE, force = TRUE)
-      dir.create(base_dir, recursive = TRUE)
+      # base_dir <- "dicoms"
+      # if (dir.exists(base_dir)) unlink(base_dir, recursive = TRUE, force = TRUE)
+      # dir.create(base_dir, recursive = TRUE)
+      # 
+      # dest <- file.path(base_dir, basename(new_file))
+      # ok <- file.rename(new_file, dest)
+      # if (!ok) {
+      #   file.copy(new_file, dest, overwrite = TRUE)
+      #   unlink(new_file)
+      # }
       
-      dest <- file.path(base_dir, basename(new_file))
+      # 3) Ensure the dicoms folder contains only this one file
+      base_dir <- DICOM_DIR  # <- use the absolute path
+      if (!dir.exists(base_dir)) dir.create(base_dir, recursive = TRUE)
+      
+      # remove existing files inside, but keep the directory
+      old <- list.files(base_dir, full.names = TRUE, all.files = FALSE, no.. = TRUE)
+      if (length(old)) file.remove(old)
+      
+      # always use a safe basename
+      safe_name <- gsub("[^A-Za-z0-9._-]", "_", basename(new_file))
+      dest <- file.path(base_dir, safe_name)
+      
+      # move (or copy if cross-filesystem)
       ok <- file.rename(new_file, dest)
       if (!ok) {
-        file.copy(new_file, dest, overwrite = TRUE)
-        unlink(new_file)
+        ok <- file.copy(new_file, dest, overwrite = TRUE)
+        if (ok) unlink(new_file)
       }
+      if (!ok) stop("Could not save DICOM to: ", dest)
       
       incProgress(0.6, detail = "Processing DICOM…")
       
