@@ -1528,11 +1528,18 @@ server <- function(input, output, session) {
   })
   
   spine_coord_plot_reactive <- reactive({
-    if (nrow(click_coordinates_df_reactive()) > 1) {
+    click_coord_df <- click_coordinates_df_reactive()
+    
+    if (nrow(click_coord_df) > 1) {
+    
+      click_coord_to_plot <- click_coord_df %>%
+        group_by(level) %>% 
+        add_tally() %>%
+        filter(n > 1) %>%
+        select(-n) %>%
+        ungroup()
       
-      vert_to_plot_df <- jh_smooth_spine_vertebral_coordinates_function(dat = click_coordinates_df_reactive()) %>%
-      
-      # vert_to_plot_df <- click_coordinates_df_reactive() %>%
+      vert_to_plot_df <- jh_smooth_spine_vertebral_coordinates_function(dat = click_coord_to_plot) %>%
         filter(level != "pelvis") %>%
         filter(level != "skull") %>%
         group_by(level) %>%
@@ -1540,7 +1547,7 @@ server <- function(input, output, session) {
         filter(n == 4) %>%
         ungroup() 
       
-      sup_endplates_df <- click_coordinates_df_reactive() %>%
+      sup_endplates_df <- click_coord_to_plot %>%
         filter(level != "pelvis") %>%
         filter(level != "skull") %>%
         group_by(level) %>%
@@ -1549,12 +1556,18 @@ server <- function(input, output, session) {
         ungroup() 
       
       if(nrow(vert_to_plot_df) > 3){
-        vert_to_plot_df %>%
+        spine_plot <- vert_to_plot_df %>%
           ggplot(aes(x = x, y = y, group = level)) +
           geom_polygon(fill = "grey33") +
-          geom_path(data = sup_endplates_df, aes(x = x, y = y)) +
           coord_fixed() +
           theme_void() 
+        
+        if(nrow(sup_endplates_df) > 1){
+        spine_plot <- spine_plot +
+          geom_path(data = sup_endplates_df, aes(x = x, y = y)) 
+        }
+        spine_plot
+        
       }
     }
   })
@@ -1589,12 +1602,67 @@ server <- function(input, output, session) {
       
       actual_mm <- distance_mm(s1_ant, l1_sup, pixel_spacing_reactive_values$spacing)
       
-      print(paste("Pixel distance = ", pixel_distance, ";\n Actual distance from L1 superior anterior corner to oS1 superior anterior corner = ", actual_mm))
+      print(paste("Pixel distance = ", pixel_distance, ";\n Actual distance from L1 superior anterior corner to S1 superior anterior corner = ", actual_mm))
     }
     
   })
   
   #################### CONFIRMING MEASURES WITH MEANS #############################
+  
+  computed_parameters_list_reactive <- reactive({
+    
+    computed_parameters_list <- list()
+    
+    coords <- click_coord_reactive_list$coords
+    req(length(coords) > 0)
+    
+    # Make a simple named list: point -> c(x, y)
+    coord_named_list <- purrr::map(coords, ~ c(.x$x, .x$y))
+    
+    needed <- c("fem_head_center","s1_superior_anterior","s1_superior_posterior")
+    
+    if (all(needed %in% names(coord_named_list))) {
+      computed_parameters_list$pelvic_incidence <- jh_compute_pelvic_incidence_from_3_coord_function(
+        fem_head_coord = coord_named_list$fem_head_center,
+        s1_sa_coord    = coord_named_list$s1_superior_anterior,
+        s1_sp_coord    = coord_named_list$s1_superior_posterior
+      )
+      
+      orient <- spine_orientation() 
+      
+      coord_df <- click_coordinates_df_reactive()
+      
+      computed_parameters_list$pelvic_tilt <- jh_calculate_tilt_function(coord_df = coord_df, vert_level = "sacrum", orientation = orient)
+
+      if (nrow(filter(coord_df, level == "l1")) == 4) {
+        
+        l1_tilt_computed <- jh_calculate_tilt_function(coord_df = coord_df, vert_level = "l1", orientation = orient)
+        computed_parameters_list$l1pa <- computed_parameters_list$pelvic_tilt + l1_tilt_computed
+        
+      }
+      
+      if (nrow(filter(coord_df, level == "t9")) == 4) {
+        t9_tilt_computed <- jh_calculate_tilt_function(coord_df = coord_df, vert_level = "t9", orientation = orient)
+        computed_parameters_list$t9pa <- computed_parameters_list$pelvic_tilt + t9_tilt_computed
+      }
+      
+      if (nrow(filter(coord_df, level == "t4")) == 4) {
+        t4_tilt_computed <- jh_calculate_tilt_function(coord_df = coord_df, vert_level = "t4", orientation = orient)
+        computed_parameters_list$t4pa <- computed_parameters_list$pelvic_tilt + t4_tilt_computed
+      }
+      
+      if (nrow(filter(coord_df, level == "c2")) == 4) {
+        c2_tilt_computed <- jh_calculate_tilt_function(coord_df = coord_df, vert_level = "c2", orientation = orient)
+        computed_parameters_list$c2pa <- computed_parameters_list$pelvic_tilt + c2_tilt_computed
+      }
+      
+    }
+    
+    computed_parameters_list
+  })
+  
+  
+  
   
   redcap_means_measures_reactive_df <- reactive({
     
@@ -1617,6 +1685,8 @@ server <- function(input, output, session) {
     }
   })
   
+
+  
   output$redcap_means_measures <- renderTable({
     
     
@@ -1628,16 +1698,22 @@ server <- function(input, output, session) {
     means_measures_long_df <- redcap_means_measures_reactive_df %>%
       dplyr::select(-tidyselect::any_of("record_id")) %>%
       tidyr::pivot_longer(dplyr::everything(), names_to = "measure", values_to = "value") %>%
-      dplyr::mutate(measure = stringr::str_to_title(stringr::str_replace_all(measure, "_", " ")))
+      dplyr::mutate(measure = stringr::str_to_title(stringr::str_replace_all(measure, "_", " ")))%>%
+      dplyr::mutate(measure = str_replace_all(measure, " Pelvic Angle", "PA")
+                    )
     
     computed_parameters_list <- computed_parameters_list_reactive()
   
     if ("pelvic_incidence" %in% names(computed_parameters_list)) {
       extra <- NULL
-      extra <- tibble::tibble(measure = "Pelvic Incidence",
-                              new   = computed_parameters_list$pelvic_incidence)
+      extra <- enframe(computed_parameters_list) %>%
+        unnest(value) %>%
+        dplyr::mutate(measure = stringr::str_to_title(stringr::str_replace_all(name, "_", " ")))%>%
+        dplyr::mutate(measure = str_replace_all(measure, "pa", "PA")
+        ) %>%
+        select(measure, new = value)
       
-      means_measures_long_df %>%
+      means_measures_long_df <- means_measures_long_df %>%
         left_join(extra)
       
     }else{
@@ -1648,52 +1724,7 @@ server <- function(input, output, session) {
     
   })
   
-  computed_parameters_list_reactive <- reactive({
-    
-    computed_parameters_list <- list()
-    
-    coords <- click_coord_reactive_list$coords
-    req(length(coords) > 0)
-    
-    # Make a simple named list: point -> c(x, y)
-    coord_named_list <- purrr::map(coords, ~ c(.x$x, .x$y))
-    
-    needed <- c("fem_head_center","s1_superior_anterior","s1_superior_posterior")
-    
-    if (all(needed %in% names(coord_named_list))) {
-      computed_parameters_list$pelvic_incidence <- jh_compute_pelvic_incidence_from_3_coord_function(
-        fem_head_coord = coord_named_list$fem_head_center,
-        s1_sa_coord    = coord_named_list$s1_superior_anterior,
-        s1_sp_coord    = coord_named_list$s1_superior_posterior
-      )
-    }
-    
-    # if (length(click_coord_reactive_list$coords) > 0) {
-    #   # Convert the list to a tibble
-    #   coord_named_list <- tibble(
-    #     spine_point = factor(names(click_coord_reactive_list$coords)),
-    #     x = map_dbl(click_coord_reactive_list$coords, "x"),
-    #     y = map_dbl(click_coord_reactive_list$coords, "y")
-    #   ) %>%
-    #     split(.$spine_point) %>%
-    #     map(~ c(.x$x, .x$y))
-    # 
-    # if(all(
-    #   any(names(coord_named_list) =="fem_head_center") &
-    #   any(names(coord_named_list) =="s1_superior_anterior") &
-    #   any(names(coord_named_list) =="s1_superior_posterior")
-    # )
-    # ){
-    #   computed_parameters_list$pelvic_incidence <- jh_compute_pelvic_incidence_from_3_coord_function(fem_head_coord = coord_named_list$fem_head_center, 
-    #                                                                                                  s1_sa_coord = coord_named_list$s1_superior_anterior,
-    #                                                                                                  s1_sp_coord = coord_named_list$s1_superior_posterior)
-    #   
-    #   
-    # }
-    # }
-    computed_parameters_list
-    
-  })
+
   
   #### CHECK METRICS ####
   

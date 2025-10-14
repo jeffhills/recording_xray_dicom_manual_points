@@ -238,6 +238,75 @@ jh_compute_vertebra_centroids <- function(df, spine_orientation = c("right","lef
 
 
 
+############# Compute tilt:
+order_around <- function(x, y) {
+  angles <- atan2(y - mean(y), x - mean(x))
+  order(angles)
+}
+
+
+jh_calculate_vertebral_centroid_from_corners_function <- function(corners_df) {
+  # Ensure correct polygon order
+  corners_df <- corners_df %>%
+    arrange(factor(spine_marker,
+                   levels = c("inferior_anterior", "inferior_posterior",
+                              "superior_posterior", "superior_anterior")))
+  
+  # Shoelace centroid formula
+  x <- corners_df$x
+  y <- corners_df$y
+  x2 <- c(x[-1], x[1])
+  y2 <- c(y[-1], y[1])
+  cross <- x * y2 - x2 * y
+  A <- sum(cross) / 2
+  cx <- sum((x + x2) * cross) / (6 * A)
+  cy <- sum((y + y2) * cross) / (6 * A)
+  
+  c(cx, cy)  # unnamed numeric vector
+}
+
+jh_calculate_tilt_function <- function(coord_df, vert_level = "l1", orientation = c("left","right")) {
+  
+  fem_head_center  <- c((filter(coord_df, spine_marker == "fem_head_center"))$x,(filter(coord_df, spine_marker == "fem_head_center"))$y) 
+  
+  if(vert_level == "s1" | vert_level == "sacrum"){
+    vert_centroid <- colMeans(filter(coord_df, level == "sacrum", str_detect(spine_marker, "superior"))[, c("x", "y")])
+  }else{
+    vert_centroid <- jh_calculate_vertebral_centroid_from_corners_function(corners_df = filter(coord_df, level == vert_level))
+  }
+  
+  orientation <- match.arg(tolower(orientation), c("left","right"))
+  
+  # vectors from vertex (fem_head_center)
+  v1 <- c(0, vert_centroid[2] - fem_head_center[2])             # vertical through fem head center
+  v2 <- c(vert_centroid[1] - fem_head_center[1],
+          vert_centroid[2] - fem_head_center[2])                 # to vert centroid
+  
+  # guard against degenerate case
+  if (all(v2 == 0) || v1[2] == 0) return(NA_real_)
+  
+  # unsigned angle between v1 and v2 (shoelace/dot form)
+  cross <- v1[1]*v2[2] - v1[2]*v2[1]
+  dot   <- v1[1]*v2[1] + v1[2]*v2[2]
+  angle_deg <- atan2(abs(cross), dot) * 180/pi
+  
+  # posterior side depends on orientation:
+  # - "right": posterior is left on image (smaller x)
+  # - "left" : posterior is right on image (larger x)
+  vert_is_posterior <- if (orientation == "right") {
+    vert_centroid[1] < fem_head_center[1]
+  } else {
+    vert_centroid[1] > fem_head_center[1]
+  }
+  
+  signed <- if (vert_is_posterior) -angle_deg else angle_deg
+  
+  # EXTRA flip for sacrum/S1
+  if (vert_level %in% c("s1","sacrum")) signed <- -signed
+  
+  signed
+}
+
 ###### SMOOTH SPINE COORDINATES ######
 
 jh_smooth_spine_vertebral_coordinates_function <- function(dat,
