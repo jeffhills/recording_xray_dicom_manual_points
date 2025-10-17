@@ -802,11 +802,11 @@ Shiny.addCustomMessageHandler('apply-filters', function(cfg){
                ),
                fluidRow(
                  column(12, 
-                        switchInput(inputId = "flag_xray", label = "Flag Xray for Abnormality or Question", value = FALSE, size = "normal"), 
-                        conditionalPanel(
-                          "input.flag_xray == true",
-                          textAreaInput(inputId = "flag_xray_reason", label = "Enter Concern:")
-                        )
+                        switchInput(inputId = "flag_xray", label = "Flag Xray for Abnormality or Question", value = FALSE, size = "normal") 
+                        # conditionalPanel(
+                        #   "input.flag_xray == true",
+                        #   textAreaInput(inputId = "flag_xray_reason", label = "Enter Concern:")
+                        # )
                  )
                )
                
@@ -905,26 +905,46 @@ server <- function(input, output, session) {
     # rcon <- redcapConnection(url = 'https://redcap.uthscsa.edu/REDCap/api/', token = xx, config =  httr::config(ssl_verifypeer = FALSE))    
     
     patient_records_all_df <-     as_tibble(exportRecordsTyped(rcon = rcon,drop_fields = "dicom",
-                                                               fields = c("record_id", "spine_dicom_coordinates_complete"),
+                                                               fields = c("record_id", "spine_dicom_coordinates_user_complete"),
                                                                filter_empty_rows = FALSE)
     )
-    
-    completed_records_vector <- unique((filter(patient_records_all_df, spine_dicom_coordinates_complete == "Complete"))$record_id)
+
+    incompleted_df <- patient_records_all_df %>%
+      select(record_id, spine_dicom_coordinates_user_complete) %>%
+      filter(spine_dicom_coordinates_user_complete != "Complete")
     
     if(next_id){
-      next_incomplete_id <- (patient_records_all_df %>%
-                               filter(record_id %in% completed_records_vector == FALSE) %>%
-                               select(record_id) %>%
-                               distinct() %>%
-                               pull(record_id))[[1]]
-      
-      next_incomplete_id 
+      incompleted_df$record_id[[1]]
     }else{
-      length(unique(patient_records_all_df$record_id)) - length(completed_records_vector)
+      
+      nrow(incompleted_df)
     }
-    
-    
   }
+  
+  # get_next_incomplete_id <- function(next_id = TRUE) {
+  #   # rcon <- redcapConnection(url = 'https://redcap.uthscsa.edu/REDCap/api/', token = xx, config =  httr::config(ssl_verifypeer = FALSE))    
+  #   
+  #   patient_records_all_df <-     as_tibble(exportRecordsTyped(rcon = rcon,drop_fields = "dicom",
+  #                                                              fields = c("record_id", "spine_dicom_coordinates_complete"),
+  #                                                              filter_empty_rows = FALSE)
+  #   )
+  #   
+  #   completed_records_vector <- unique((filter(patient_records_all_df, spine_dicom_coordinates_complete == "Complete"))$record_id)
+  #   
+  #   if(next_id){
+  #     next_incomplete_id <- (patient_records_all_df %>%
+  #                              filter(record_id %in% completed_records_vector == FALSE) %>%
+  #                              select(record_id) %>%
+  #                              distinct() %>%
+  #                              pull(record_id))[[1]]
+  #     
+  #     next_incomplete_id 
+  #   }else{
+  #     length(unique(patient_records_all_df$record_id)) - length(completed_records_vector)
+  #   }
+  # }
+  
+
   
   output$number_of_records_remaining <- renderText({
     
@@ -1266,6 +1286,58 @@ server <- function(input, output, session) {
     }
   })
   
+  
+  # observeEvent(click_coord_reactive_list$coords, ignoreInit = TRUE, {
+  #   clicked_ids <- names(click_coord_reactive_list$coords)
+  # 
+  #   if(length(isTRUE(str_detect(clicked_ids, "t12"))) == 2){
+  #     
+  #     coord_named_list <- purrr::map(coords, ~ c(.x$x, .x$y))
+  #     
+  #     if (spine_orientation() == "left") {
+  #       
+  #       if(coord_named_list$t12_superior_anterior$x > coord_named_list$t12_superior_posterior$x){
+  #         sendSweetAlert(session, title = "Suspected error", text = "did you click only the superior endplates of the last vertebra?", type = "error")
+  #       }
+  #       }else{
+  #         if(coord_named_list$t12_superior_anterior$x < coord_named_list$t12_superior_posterior$x){
+  #           sendSweetAlert(session, title = "Suspected error", text = "did you click only the superior endplates of the last vertebra?", type = "error")
+  #         }
+  #     }
+  #   }
+  # })
+  
+  endplate_orientation_bad <- function(coords, level = "t12", plate = "superior") {
+    sa <- coords[[paste0(level, "_", plate, "_anterior")]]
+    sp <- coords[[paste0(level, "_", plate, "_posterior")]]
+    
+    # if either missing, don't flag (caller should guard with req/all())
+    if (is.null(sa) || is.null(sp)) return(FALSE)
+    
+    sa_x <- sa$x
+    sp_x <- sp$x
+    
+    ori <- spine_orientation()  # "left" or "right"
+    (ori == "left"  && sa_x > sp_x) ||
+      (ori == "right" && sa_x < sp_x)
+  }
+  
+  observeEvent(click_coord_reactive_list$coords, ignoreInit = TRUE, {
+    coords <- click_coord_reactive_list$coords
+    needed <- c("t12_superior_anterior", "t12_superior_posterior")
+    
+    # fire only when both t12 superior points exist
+    if (!all(needed %in% names(coords))) return(NULL)
+    
+    if (endplate_orientation_bad(coords, level = "t12", plate = "superior")) {
+      sendSweetAlert(
+        session,
+        title = "Suspected error",
+        text  = "Did you click only the superior endplates of the last vertebra?",
+        type  = "error"
+      )
+    }
+  })
   # If you support delete/reset elsewhere, always re-send the current set:
   
   
@@ -1500,10 +1572,41 @@ server <- function(input, output, session) {
         select(level, spine_marker, x, y) %>%
         mutate(level = fct_inorder(level)) 
       
-      # click_coordinates_df_reactive_df
-      
       jh_add_missing_inferior_corners(click_coordinates_df_reactive_df) %>%
-        distinct()
+      distinct()
+
+        # click_coordinates_df_reactive_filled_df <-  jh_add_missing_inferior_corners(click_coordinates_df_reactive_df) %>%
+        # distinct()
+
+        # if(nrow(filter(click_coordinates_df_reactive_filled_df, level == levels_need_inferior_coord_vector[[1]]))==4){
+        #   poly_area <- function(x, y) {
+        #     # shoelace
+        #     0.5 * abs(sum(x * c(y[-1], y[1]) - y * c(x[-1], x[1])))
+        #   }
+        #   
+        #   lumbar_vert_area <- click_coordinates_df_reactive_filled_df %>%
+        #     filter(level == "l3")%>%
+        #     summarise(area = poly_area(x, y), .groups = "drop") %>%
+        #     pull(area)
+        #   
+        #   most_recent_vert_area <- click_coordinates_df_reactive_filled_df %>%
+        #     filter(level == levels_need_inferior_coord_vector[[1]])%>%
+        #     summarise(area = poly_area(x, y), .groups = "drop") %>%
+        #     pull(area)
+        #   
+        #   if(most_recent_vert_area < 0.25*lumbar_vert_area){
+        #     click_coordinates_df_reactive_filled_df
+        #     sendSweetAlert(session, title = "Suspected error", text = "did you click only the superior endplates of the last vertebra?", type = "error")
+        #     
+        #   }else{
+        #     click_coordinates_df_reactive_filled_df
+        #   }
+        #   
+        #   
+        # }else{
+        #   click_coordinates_df_reactive_filled_df
+        # }
+      
       
     } else {
       tibble(spine_point = character(), x = double(), y = double())
@@ -1546,6 +1649,35 @@ server <- function(input, output, session) {
         add_tally() %>%
         filter(n == 4) %>%
         ungroup() 
+      
+      # if(nrow(filter(click_coordinates_df_reactive_filled_df, level == levels_need_inferior_coord_vector[[1]]))==4){
+      #   poly_area <- function(x, y) {
+      #     # shoelace
+      #     0.5 * abs(sum(x * c(y[-1], y[1]) - y * c(x[-1], x[1])))
+      #   }
+      #   
+      #   lumbar_vert_area <- click_coordinates_df_reactive_filled_df %>%
+      #     filter(level == "l3")%>%
+      #     summarise(area = poly_area(x, y), .groups = "drop") %>%
+      #     pull(area)
+      #   
+      #   most_recent_vert_area <- click_coordinates_df_reactive_filled_df %>%
+      #     filter(level == levels_need_inferior_coord_vector[[1]])%>%
+      #     summarise(area = poly_area(x, y), .groups = "drop") %>%
+      #     pull(area)
+      #   
+      #   if(most_recent_vert_area < 0.25*lumbar_vert_area){
+      #     click_coordinates_df_reactive_filled_df
+      #     sendSweetAlert(session, title = "Suspected error", text = "did you click only the superior endplates of the last vertebra?", type = "error")
+      #     
+      #   }else{
+      #     click_coordinates_df_reactive_filled_df
+      #   }
+      #   
+      #   
+      # }else{
+      #   click_coordinates_df_reactive_filled_df
+      # }
       
       sup_endplates_df <- click_coord_to_plot %>%
         filter(level != "pelvis") %>%
@@ -1745,12 +1877,43 @@ server <- function(input, output, session) {
         "Pelvic Incidence in Database = {round(recorded_pi,1)}\nvs\nNewly calculated PI = {round(calculated_pi_from_coord,1)}\nPlease delete prior points and adjust."
       )
       sendSweetAlert(session, title = "Error in PI", text = msg, type = "error")
+      
+      clicked_ids <- names(click_coord_reactive_list$coords)
+      req(length(clicked_ids) > 0)
+      
+      # Use the SAME id vector used everywhere else
+      ordered_clicked <- intersect(spine_point_ids, clicked_ids)
+      req(length(ordered_clicked) > 0)
+      
+      last_id <- tail(ordered_clicked, 1)
+      # remove
+      click_coord_reactive_list$coords[[last_id]] <- NULL
+      
+      # push fresh coords to your reactiveVal and to the browser
+      coords_for_js <- .current_coords_for_js()
+      plot_points_coordinates_reactiveval(coords_for_js)
+      session$sendCustomMessage('plot-coordinates', list(coords = coords_for_js))
+      
     }
     
 
     
   })
   
+  ### ALERT FOR accidentally clicking inferior coordinates when not needed
+  
+  # observeEvent(input$xray_click, ignoreInit = TRUE, {
+  #   
+  #   coords <- click_coord_reactive_list$coords
+  #   req(length(coords) > 0)
+  #   
+  #   # Make a simple named list: point -> c(x, y)
+  #   coord_named_list <- purrr::map(coords, ~ c(.x$x, .x$y))
+  #   
+  #   
+  # 
+  #   
+  #   })
   
   
 
@@ -1824,26 +1987,6 @@ server <- function(input, output, session) {
         )
       )
     )
-    # showModal(
-    #   modalDialog(footer = "Redcap Upload", easyClose = TRUE,  size = "l",  
-    #               box(width = 12, title = "Upload Data to Redcap", footer = NULL, 
-    #                   fluidRow(
-    #                     actionBttn(inputId = "confirm_upload_final",
-    #                                label = "Confirmed, Upload to Redcap",
-    #                                style = "simple", color = "primary")
-    #                   ),
-    #                   br(),
-    #                   fluidRow(
-    #                     column(6, 
-    #                            tableOutput(outputId = "spine_coord_redcap_table")
-    #                     ),
-    #                     column(6, 
-    #                            plotOutput(outputId = "spine_coord_plot_confirmation")
-    #                     )
-    #                   )
-    #               )
-    #   )
-    # ) 
   })
   
   observeEvent(input$confirm_upload_final, ignoreInit = TRUE, {
@@ -1890,7 +2033,59 @@ server <- function(input, output, session) {
   )
   
   
+  observeEvent(input$flag_xray, ignoreInit = TRUE, {
+    if(input$flag_xray){
+      showModal(
+        modalDialog(
+          footer = "Redcap Upload", easyClose = TRUE, size = "l",
+          box(width = 12, title = "Upload to Redcap", footer = NULL,
+              fluidRow(
+                textAreaInput(inputId = "flag_xray_reason", label = "Enter Concern:"),
+                br(),
+                actionBttn("confirm_upload_flag", "Confirmed, Upload to Redcap",
+                           style = "simple", color = "primary")
+              ),
+              br()
+          )
+        )
+      )
+    }
+  })
   
+  observeEvent(input$confirm_upload_flag, ignoreInit = TRUE, {
+  
+    pid <- patient_id_reactive_val()
+    
+    withProgress(message = 'Uploading Data', value = 0, {
+      number_of_steps <- 1
+      incProgress(1/number_of_steps, detail = paste("Uploading User & Time"))
+      
+      user_time_flag_df <- tibble(record_id = pid, 
+                                  user_last_name = input$last_name,
+                                  date_time_upload = paste(Sys.time()),
+                                  flag_xray = input$flag_xray,
+                                  flag_xray_reason = input$flag_xray_reason,
+                                  spine_dicom_coordinates_user_complete = "Complete")
+      # flag_xray
+      
+      
+      redcapAPI::importRecords(rcon = rcon, data = user_time_flag_df, 
+                               returnContent = "count")
+      
+      incProgress(1/number_of_steps, detail = paste("Uploading Complete"))
+      
+      completion_text <- paste("Flag was successfully uploaded.") 
+    }
+    )
+    sendSweetAlert(
+      session = session,
+      title = "Success!!",
+      text = completion_text,
+      type = "success"
+    )
+    
+    }
+  )
   
   observeEvent(xray_instructions_reactiveval(), ignoreInit = TRUE, {
     if(xray_instructions_reactiveval() == "Completed"){

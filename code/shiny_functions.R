@@ -22,7 +22,7 @@ jh_spine_levels_factors_df <- tibble(level = c("c1", "c2", "c3", "c4", "c5", "c6
   mutate(interspace = paste0(level_label, "-", lead(level_label))) %>%
   mutate(interspace = if_else(interspace == "L5-NA", "L5-S1", interspace)) %>%
   mutate(interspace = fct_inorder(interspace))
-
+ 
 
 spine_points_vector <- c(
   # 'fem_head_center' = 'Femoral Head Center',
