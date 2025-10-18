@@ -802,11 +802,19 @@ Shiny.addCustomMessageHandler('apply-filters', function(cfg){
                ),
                fluidRow(
                  column(12, 
-                        switchInput(inputId = "flag_xray", label = "Flag Xray for Abnormality or Question", value = FALSE, size = "normal") 
-                        # conditionalPanel(
-                        #   "input.flag_xray == true",
-                        #   textAreaInput(inputId = "flag_xray_reason", label = "Enter Concern:")
-                        # )
+                        switchInput(inputId = "flag_xray", label = "Flag Xray for Abnormality or Question", value = FALSE, size = "normal"),
+                        br(),
+                        tags$head(
+                          tags$style(HTML("
+    #redcap_upload_completion {
+      font-size: 28px;        /* large */
+      font-weight: 700;       /* bold */
+      font-style: italic;     /* italics */
+      color: #0B6623;         /* dark green */
+    }
+  "))
+                        ),
+                        textOutput("redcap_upload_completion")
                  )
                )
                
@@ -1333,7 +1341,7 @@ server <- function(input, output, session) {
       sendSweetAlert(
         session,
         title = "Suspected error",
-        text  = "Did you click only the superior endplates of the last vertebra?",
+        text  = "It looks like you clicked the inferior Coordinate - Only superior endplates from here until C2 need clicked.",
         type  = "error"
       )
     }
@@ -1989,6 +1997,8 @@ server <- function(input, output, session) {
     )
   })
   
+  redcap_upload_complete_reactiveval <- reactiveVal("Incomplete")
+  
   observeEvent(input$confirm_upload_final, ignoreInit = TRUE, {
     
     # rcon <- redcapConnection(url = 'https://redcap.uthscsa.edu/REDCap/api/', token = "zz", 
@@ -2016,6 +2026,8 @@ server <- function(input, output, session) {
       redcapAPI::importRecords(rcon = rcon, data = redcap_tables$spine_coordinates_df, returnContent = "count")
       
       incProgress(1/number_of_steps, detail = paste("Uploading Complete"))
+      
+      redcap_upload_complete_reactiveval("Complete")
       
       completion_text <- paste("Tables were successfully uploaded.") 
     }
@@ -2149,6 +2161,17 @@ server <- function(input, output, session) {
   
   output$user_last_name <- renderText({
     paste("User:", input$last_name)
+  })
+  
+  output$redcap_upload_completion <- renderText({
+    redcap_completion <- redcap_upload_complete_reactiveval()
+    
+    if(redcap_completion == "Complete"){
+      paste("REDCAP UPLOAD COMPLETE")
+    }else{
+      NULL
+    }
+    
   })
   
 }
