@@ -265,6 +265,7 @@ jh_calculate_vertebral_centroid_from_corners_function <- function(corners_df) {
   c(cx, cy)  # unnamed numeric vector
 }
 
+
 jh_calculate_tilt_function <- function(coord_df, vert_level = "l1", orientation = c("left","right")) {
   
   fem_head_center  <- c((filter(coord_df, spine_marker == "fem_head_center"))$x,(filter(coord_df, spine_marker == "fem_head_center"))$y) 

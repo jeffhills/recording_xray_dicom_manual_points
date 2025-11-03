@@ -919,7 +919,8 @@ server <- function(input, output, session) {
 
     incompleted_df <- patient_records_all_df %>%
       select(record_id, spine_dicom_coordinates_user_complete) %>%
-      filter(spine_dicom_coordinates_user_complete != "Complete")
+      filter(spine_dicom_coordinates_user_complete != "Complete") %>%
+      filter(as.numeric(record_id) > 267)
     
     if(next_id){
       incompleted_df$record_id[[1]]
