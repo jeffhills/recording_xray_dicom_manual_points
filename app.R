@@ -923,7 +923,9 @@ server <- function(input, output, session) {
       filter(as.numeric(record_id) > 350)
     
     if(next_id){
-      incompleted_df$record_id[[1]]
+      sample(incompleted_df$record_id, size = 1)
+      
+      # incompleted_df$record_id[[1]]
     }else{
       
       nrow(incompleted_df)
